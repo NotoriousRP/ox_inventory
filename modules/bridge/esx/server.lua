@@ -38,6 +38,7 @@ server.accounts = {
 	black_money = 0,
 }
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.setPlayerData(player)
 	local groups = {
 		[player.job.name] = player.job.grade
@@ -52,6 +53,7 @@ function server.setPlayerData(player)
 	}
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.syncInventory(inv)
 	local money = table.clone(server.accounts)
 
@@ -65,21 +67,23 @@ function server.syncInventory(inv)
 	player.syncInventory(inv.weight, inv.maxWeight, inv.items, money)
 end
 
-function server.hasLicense(inv, license)
-	return db.selectLicense(license, inv.owner)
+---@diagnostic disable-next-line: duplicate-set-field
+function server.hasLicense(inv, name)
+	return MySQL.scalar.await('SELECT 1 FROM `user_licenses` WHERE `type` = ? AND `owner` = ?', { name, inv.owner })
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.buyLicense(inv, license)
-	if db.selectLicense(license.name, inv.owner) then
-		return false, 'has_weapon_license'
+	if server.hasLicense(inv, license.name) then
+		return false, 'already_have'
 	elseif Inventory.GetItem(inv, 'money', false, true) < license.price then
-		return false, 'poor_weapon_license'
+		return false, 'can_not_afford'
 	end
 
 	Inventory.RemoveItem(inv, 'money', license.price)
-	TriggerEvent('esx_license:addLicense', inv.id, 'weapon')
+	TriggerEvent('esx_license:addLicense', inv.id, license.name)
 
-	return true, 'bought_weapon_license'
+	return true, 'have_purchased'
 end
 
 --- Takes traditional item data and updates it to support ox_inventory, i.e.
@@ -87,6 +91,7 @@ end
 --- Old: {"cola":1, "burger":3}
 --- New: [{"slot":1,"name":"cola","count":1}, {"slot":2,"name":"burger","count":3}]
 ---```
+---@diagnostic disable-next-line: duplicate-set-field
 function server.convertInventory(playerId, items)
 	if type(items) == 'table' then
 		local player = server.GetPlayerFromId(playerId)
@@ -120,3 +125,7 @@ function server.convertInventory(playerId, items)
 		return returnData, totalWeight
 	end
 end
+
+MySQL.ready(function()
+	MySQL.insert('INSERT IGNORE INTO `licenses` (`type`, `label`) VALUES (?, ?)', { 'weapon', 'Weapon License'})
+end)

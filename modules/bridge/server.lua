@@ -17,9 +17,10 @@ function server.hasGroup(inv, group)
 	end
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.setPlayerData(player)
 	if not player.groups then
-		shared.warning(("server.setPlayerData did not receive any groups for '%s'"):format(player?.name or GetPlayerName(player)))
+		warn(("server.setPlayerData did not receive any groups for '%s'"):format(player?.name or GetPlayerName(player)))
 	end
 
 	return {
@@ -31,8 +32,9 @@ function server.setPlayerData(player)
 	}
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.buyLicense()
-	shared.warning('Licenses are not yet supported without esx or qb. Available soon™.')
+	warn('Licenses are not supported for the current framework.')
 end
 
 local Inventory
@@ -44,7 +46,7 @@ end)
 local function playerDropped(source)
 	local inv = Inventory(source)
 
-	if inv then
+	if inv?.player then
 		local openInventory = inv.open and Inventory(inv.open)
 
 		if openInventory then
@@ -55,11 +57,13 @@ local function playerDropped(source)
 			db.savePlayer(inv.owner, json.encode(inv:minimal()))
 		end
 
-		Inventory.Remove(source)
+		Inventory.Remove(inv)
 	end
 end
 
-AddEventHandler('playerDropped', playerDropped)
+AddEventHandler('playerDropped', function()
+	playerDropped(source)
+end)
 
 local scriptPath = ('modules/bridge/%s/server.lua'):format(shared.framework)
 local resourceFile = LoadResourceFile(cache.resource, scriptPath)

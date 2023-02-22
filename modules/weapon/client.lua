@@ -33,8 +33,7 @@ function Weapon.Equip(item, data)
 
 		local sleep = anim and anim[3] or 1200
 
-		Utils.PlayAnimAdvanced(sleep*2, anim and anim[1] or 'reaction@intimidation@1h', anim and anim[2] or 'intro', coords.x, coords.y, coords.z, 0, 0, GetEntityHeading(playerPed), 8.0, 3.0, -1, 50, 0.1)
-		Wait(sleep)
+		Utils.PlayAnimAdvanced(sleep, anim and anim[1] or 'reaction@intimidation@1h', anim and anim[2] or 'intro', coords.x, coords.y, coords.z, 0, 0, GetEntityHeading(playerPed), 8.0, 3.0, sleep*2, 50, 0.1)
 	end
 
 	::skipAnim::
@@ -60,17 +59,19 @@ function Weapon.Equip(item, data)
 
 	item.hash = data.hash
 	item.ammo = data.ammoname
-	item.melee = (not item.throwable and not data.ammoname) and 0
+	item.melee = GetWeaponDamageType(data.hash) == 2 and 0
 	item.timer = 0
-
-	if data.throwable then item.throwable = true end
+	item.throwable = data.throwable
 
 	SetCurrentPedWeapon(playerPed, data.hash, true)
 	SetPedCurrentWeaponVisible(playerPed, true, false, false, false)
-	AddAmmoToPed(playerPed, data.hash, item.metadata.ammo or 100)
-	Wait(0)
-	RefillAmmoInstantly(playerPed)
 	SetWeaponsNoAutoswap(true)
+
+	local ammo = item.metadata.ammo or item.throwable and 1 or 0
+
+	if ammo > 0 then
+		SetAmmoInClip(playerPed, data.hash, ammo)
+	end
 
 	if data.hash == `WEAPON_PETROLCAN` or data.hash == `WEAPON_HAZARDCAN` or data.hash == `WEAPON_FERTILIZERCAN` or data.hash == `WEAPON_FIREEXTINGUISHER` then
 		item.metadata.ammo = item.metadata.durability
@@ -84,11 +85,14 @@ function Weapon.Equip(item, data)
 end
 
 function Weapon.Disarm(currentWeapon, noAnim)
+	if not currentWeapon?.timer then return end
+
 	if source == '' then
 		TriggerServerEvent('ox_inventory:updateWeapon')
 	end
 
 	if currentWeapon then
+		currentWeapon.timer = nil
 		SetPedAmmo(cache.ped, currentWeapon.hash, 0)
 
 		if client.weaponanims and not noAnim then
@@ -108,8 +112,7 @@ function Weapon.Disarm(currentWeapon, noAnim)
 
 			local sleep = anim and anim[6] or 1400
 
-			Utils.PlayAnimAdvanced(sleep, anim and anim[4] or 'reaction@intimidation@1h', anim and anim[5] or 'outro', coords.x, coords.y, coords.z, 0, 0, GetEntityHeading(cache.ped), 8.0, 3.0, -1, 50, 0)
-			Wait(sleep)
+			Utils.PlayAnimAdvanced(sleep, anim and anim[4] or 'reaction@intimidation@1h', anim and anim[5] or 'outro', coords.x, coords.y, coords.z, 0, 0, GetEntityHeading(cache.ped), 8.0, 3.0, sleep, 50, 0)
 		end
 
 		::skipAnim::

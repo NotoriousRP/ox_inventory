@@ -108,7 +108,7 @@ CreateThread(function()
 					if not ItemList[formatName] then
 						fileSize += 1
 
-						file[fileSize] = (itemFormat):format(formatName, item.label:gsub("'", "\\'"):lower(), item.weight, item.stack, item.close, item.description and ('"%s"'):format(item.description) or 'nil')
+						file[fileSize] = (itemFormat):format(formatName, item.label:gsub("'", "\\'"), item.weight, item.stack, item.close, item.description and json.encode(item.description) or 'nil')
 						ItemList[formatName] = item
 					end
 				end
@@ -121,8 +121,8 @@ CreateThread(function()
 			end
 
 			shared.info('Database contains', #items, 'items.')
-			shared.warning('Any resources that rely on the database for item data is incompatible with this resource.')
-			shared.warning('Utilise \'exports.ox_inventory:Items()\', or lazy-load ESX and use ESX.Items instead.')
+
+			warn('Some third-party resources may conflict with item and inventory data structure.\n')
 		end
 
 		Wait(500)
@@ -192,7 +192,7 @@ CreateThread(function()
 					if not ItemList[formatName] then
 						fileSize += 1
 
-						file[fileSize] = (itemFormat):format(formatName, item.label:gsub("'", "\\'"):lower(), item.weight, item.stack, item.close, item.description and ('"%s"'):format(item.description) or 'nil')
+						file[fileSize] = (itemFormat):format(formatName, item.label:gsub("'", "\\'"), item.weight, item.stack, item.close, item.description and json.encode(item.description) or 'nil')
 						ItemList[formatName] = item
 					end
 				end
@@ -244,9 +244,23 @@ local function GenerateSerial(text)
 	return ('%s%s%s'):format(math.random(100000,999999), text == nil and GenerateText(3) or text, math.random(100000,999999))
 end
 
+local function setItemDurability(item, metadata)
+	local degrade = item.degrade
+
+	if degrade then
+		metadata.durability = os.time()+(degrade * 60)
+		metadata.degrade = degrade
+	elseif item.durability then
+		metadata.durability = 100
+	end
+
+	return metadata
+end
+
 function Items.Metadata(inv, item, metadata, count)
 	if type(inv) ~= 'table' then inv = Inventory(inv) end
 	if not item.weapon then metadata = not metadata and {} or type(metadata) == 'string' and {type=metadata} or metadata end
+	if not count then count = 1 end
 
 	if item.weapon then
 		if type(metadata) ~= 'table' then metadata = {} end
@@ -275,29 +289,48 @@ function Items.Metadata(inv, item, metadata, count)
 			count = 1
 			metadata.container = metadata.container or GenerateText(3)..os.time()
 			metadata.size = container.size
-		elseif item.name == 'identification' then
-			count = 1
-			if next(metadata) == nil then
+		elseif not next(metadata) then
+			if item.name == 'identification' then
+				count = 1
 				metadata = {
 					type = inv.player.name,
 					description = locale('identification', (inv.player.sex) and locale('male') or locale('female'), inv.player.dateofbirth)
 				}
+			elseif item.name == 'garbage' then
+				local trashType = trash[math.random(1, #trash)]
+				metadata.image = trashType.image
+				metadata.weight = trashType.weight
+				metadata.description = trashType.description
 			end
-		elseif item.name == 'garbage' then
-			local trashType = trash[math.random(1, #trash)]
-			metadata.image = trashType.image
-			metadata.weight = trashType.weight
-			metadata.description = trashType.description
 		end
 
-		if not metadata?.durability then
-			local durability = ItemList[item.name].degrade
-			if durability then metadata.durability = os.time()+(durability * 60) metadata.degrade = durability end
+		if not metadata.durability then
+			metadata = setItemDurability(ItemList[item.name], metadata)
 		end
 	end
 
 	if count > 1 and not item.stack then
 		count = 1
+	end
+
+	local response = TriggerEventHooks('createItem', {
+		inventoryId = inv and inv.id,
+		metadata = metadata,
+		item = item,
+		count = count,
+	})
+
+	if type(response) == 'table' then
+		metadata = response
+	end
+
+	if metadata.imageurl and Utils.IsValidImageUrl then
+		if Utils.IsValidImageUrl(metadata.imageurl) then
+			Utils.DiscordEmbed('Valid image URL', ('Created item "%s" (%s) with valid url in "%s".\n%s\nid: %s\nowner: %s'):format(metadata.label or item.label, item.name, inv.label, metadata.imageurl, inv.id, inv.owner, metadata.imageurl), metadata.imageurl, 65280)
+		else
+			Utils.DiscordEmbed('Invalid image URL', ('Created item "%s" (%s) with invalid url in "%s".\n%s\nid: %s\nowner: %s'):format(metadata.label or item.label, item.name, inv.label, metadata.imageurl, inv.id, inv.owner, metadata.imageurl), metadata.imageurl, 16711680)
+			metadata.imageurl = nil
+		end
 	end
 
 	return metadata, count
@@ -312,13 +345,17 @@ function Items.CheckMetadata(metadata, item, name, ostime)
 
 	local durability = metadata.durability
 
-	if durability and durability > 100 and ostime >= durability then
-		metadata.durability = 0
+	if durability then
+		if durability > 100 and ostime >= durability then
+			metadata.durability = 0
+		end
+	else
+		metadata = setItemDurability(item, metadata)
 	end
 
 	if metadata.components then
 		if table.type(metadata.components) == 'array' then
-			for i = 1, #metadata.components do
+			for i = #metadata.components, 1, -1 do
 				if not ItemList[metadata.components[i]] then
 					table.remove(metadata.components, i)
 				end
@@ -326,12 +363,14 @@ function Items.CheckMetadata(metadata, item, name, ostime)
 		else
 			local components = {}
 			local size = 0
+
 			for _, component in pairs(metadata.components) do
 				if component and ItemList[component] then
 					size += 1
 					components[size] = component
 				end
 			end
+
 			metadata.components = components
 		end
 	end

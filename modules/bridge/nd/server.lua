@@ -8,19 +8,30 @@ end)
 
 AddEventHandler("ND:characterUnloaded", playerDropped)
 
+RegisterNetEvent("ND:jobChanged", function(source, job, lastJob)
+    local inventory = Inventory(source)
+	if not inventory then return end
+	inventory.player.groups[lastJob.name] = nil
+	inventory.player.groups[job.name] = job.rank
+end)
+
+local function reorderGroups(groups)
+    groups = groups or {}
+    for group, info in pairs(groups) do
+        groups[group] = info.rank
+    end
+    return groups
+end
+
 SetTimeout(500, function()
     NDCore = exports["ND_Core"]:GetCoreObject()
     server.GetPlayerFromId = NDCore.Functions.GetPlayer
     for _, character in pairs(NDCore.Functions.GetPlayers()) do
         character.identifier = character.id
-        character.name = tostring(character.firstName) .. " " .. tostring(character.lastName)
+        character.name = ("%s %s"):format(character.firstName, character.lastName)
         character.dateofbirth = character.dob
         character.sex = character.gender
-        local groups = {}
-        for group, info in pairs(character.groups) do
-            groups[group] = info.lvl
-        end
-        character.groups = groups
+        character.groups = reorderGroups(character.data.groups)
         server.setPlayerInventory(character, character.inventory)
         Inventory.SetItem(character.source, "money", character.cash)
     end
@@ -34,14 +45,11 @@ server.accounts = {
 RegisterNetEvent("ND:characterLoaded", function(character)
     if not character then return end
     character.identifier = character.id
-    character.name = tostring(character.firstName) .. " " .. tostring(character.lastName)
+    character.name = ("%s %s"):format(character.firstName, character.lastName)
     character.dateofbirth = character.dob
     character.sex = character.gender
-    local groups = {}
-    for group, info in pairs(character.groups) do
-        groups[group] = info.lvl
-    end
-    character.groups = groups
+
+    local groups = reorderGroups(character.data.groups)
     server.setPlayerInventory(character, character.inventory)
     Inventory.SetItem(character.source, "money", character.cash)
 end)
@@ -52,50 +60,56 @@ RegisterNetEvent("ND:moneyChange", function(player, account, amount, changeType)
     Inventory.SetItem(player, "money", changeType == "set" and amount or changeType == "remove" and item - amount or changeType == "add" and item + amount)
 end)
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.syncInventory(inv)
     local money = table.clone(server.accounts)
-    
+
     for _, v in pairs(inv.items) do
         if money[v.name] then
             money[v.name] += v.count
         end
     end
-    
+
     if money then
-        NDCore.Functions.SetPlayerData(inv.id, "cash", money.money)
+        local character = NDCore.Functions.GetPlayer(inv.id)
+        NDCore.Functions.SetPlayerData(character.id, "cash", money.money)
     end
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.setPlayerData(player)
-    local groups = {}
-    for group, info in pairs(player.groups) do
-        groups[group] = info.lvl
-    end
-
     return {
         source = player.source,
         identifier = player.id,
-        name = player.firstName .. " " .. player.lastName,
-        groups = groups,
+        name = ("%s %s"):format(player.firstName, player.lastName),
+        groups = player.data.groups,
         sex = player.gender,
         dateofbirth = player.dob,
         job = player.job
     }
 end
 
-function server.buyLicense(inv, license)
-    local player = server.GetPlayerFromId(source)
-    if not player then return end
+---@diagnostic disable-next-line: duplicate-set-field
+function server.hasLicense(inv, license)
+    local character = NDCore.Functions.GetPlayer(inv.id)
+    if not character or not character.data.licences then return end
 
-    if player.PlayerData.metadata.licences.weapon then
-        return false, "has_weapon_license"
-    elseif Inventory.GetItem(inv, "money", false, true) < license.price then
-        return false, "poor_weapon_license"
+    for _, characterLicense in pairs(character.data.licences) do
+        if characterLicense.type == license and characterLicense.status == "valid" then
+            return characterLicense.type
+        end
     end
+end
 
-    Inventory.RemoveItem(inv, "money", license.price)
-    player.PlayerData.metadata.licences.weapon = true
-    NDCore.Functions.SetPlayerData(player.source, "licences", player.PlayerData.metadata.licences)
+---@diagnostic disable-next-line: duplicate-set-field
+function server.buyLicense(inv, license)
+	if server.hasLicense(inv, license.name) then
+		return false, "already_have"
+	elseif Inventory.GetItem(inv, "money", false, true) < license.price then
+		return false, "can_not_afford"
+	end
 
-    return true, "bought_weapon_license"
+	Inventory.RemoveItem(inv, "money", license.price)
+	NDCore.Functions.CreatePlayerLicense(inv.owner, "weapon")
+	return true, "have_purchased"
 end

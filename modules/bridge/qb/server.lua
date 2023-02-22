@@ -1,8 +1,9 @@
 local playerDropped = ...
-local Inventory
+local Inventory, Items
 
 CreateThread(function()
 	Inventory = server.inventory
+	Items = server.items
 end)
 
 local QBCore
@@ -47,11 +48,11 @@ local function setupPlayer(Player)
 	Inventory.SetItem(Player.PlayerData.source, 'money', Player.PlayerData.money.cash)
 
 	QBCore.Functions.AddPlayerMethod(Player.PlayerData.source, "AddItem", function(item, amount, slot, info)
-		Inventory.AddItem(Player.PlayerData.source, item, amount, info, slot)
+		return Inventory.AddItem(Player.PlayerData.source, item, amount, info, slot)
 	end)
 
 	QBCore.Functions.AddPlayerMethod(Player.PlayerData.source, "RemoveItem", function(item, amount, slot)
-		Inventory.RemoveItem(Player.PlayerData.source, item, amount, nil, slot)
+		return Inventory.RemoveItem(Player.PlayerData.source, item, amount, nil, slot)
 	end)
 
 	QBCore.Functions.AddPlayerMethod(Player.PlayerData.source, "GetItemBySlot", function(slot)
@@ -112,6 +113,7 @@ AddEventHandler('QBCore:Server:OnMoneyChange', function(src, account, amount, ch
 	Inventory.SetItem(src, 'money', changeType == "set" and amount or changeType == "remove" and item.count - amount or changeType == "add" and item.count + amount)
 end)
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.setPlayerData(player)
 	local groups = {
 		[player.job.name] = player.job.grade.level,
@@ -129,6 +131,7 @@ function server.setPlayerData(player)
 	}
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.syncInventory(inv)
 	local money = table.clone(server.accounts)
 
@@ -142,26 +145,28 @@ function server.syncInventory(inv)
 	player.syncInventory(inv.weight, inv.maxWeight, inv.items, money)
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.hasLicense(inv, license)
 	local player = server.GetPlayerFromId(inv.id)
 	return player and player.PlayerData.metadata.licences[license]
 end
 
+---@diagnostic disable-next-line: duplicate-set-field
 function server.buyLicense(inv, license)
 	local player = server.GetPlayerFromId(inv.id)
 	if not player then return end
 
 	if player.PlayerData.metadata.licences[license] then
-		return false, 'has_weapon_license'
+		return false, 'already_have'
 	elseif Inventory.GetItem(inv, 'money', false, true) < license.price then
-		return false, 'poor_weapon_license'
+		return false, 'can_not_afford'
 	end
 
 	Inventory.RemoveItem(inv, 'money', license.price)
 	player.PlayerData.metadata.licences.weapon = true
 	player.Functions.SetMetaData('licences', player.PlayerData.metadata.licences)
 
-	return true, 'bought_weapon_license'
+	return true, 'have_purchased'
 end
 
 --- Takes traditional item data and updates it to support ox_inventory, i.e.
@@ -169,6 +174,7 @@ end
 --- Old: {1:{"name": "cola", "amount": 1, "label": "Cola", "slot": 1}, 2:{"name": "burger", "amount": 3, "label": "Burger", "slot": 2}}
 --- New: [{"slot":1,"name":"cola","count":1}, {"slot":2,"name":"burger","count":3}]
 ---```
+---@diagnostic disable-next-line: duplicate-set-field
 function server.convertInventory(playerId, items)
 	if type(items) == 'table' then
 		local player = server.GetPlayerFromId(playerId)
@@ -185,10 +191,10 @@ function server.convertInventory(playerId, items)
 				end
 
 				if not hasThis then
-					local account = player.getAccount(name)
+					local amount = player.Functions.GetMoney(name == 'money' and 'cash' or name)
 
-					if account.money then
-						items[#items + 1] = {amount = account.money}
+					if amount then
+						items[#items + 1] = { name = name, amount = amount }
 					end
 				end
 			end
@@ -197,15 +203,34 @@ function server.convertInventory(playerId, items)
 		for _, data in pairs(items) do
 			local item = Items(data.name)
 
-			if item and data then
-				local metadata = Items.Metadata(playerId, item, data.info, data.amount)
-				local weight = Inventory.SlotWeight(item, {count = data.amount, metadata = metadata})
+			if item?.name then
+				local metadata, count = Items.Metadata(playerId, item, data.info, data.amount or data.count or 1)
+				local weight = Inventory.SlotWeight(item, {count = count, metadata = metadata})
 				totalWeight += weight
 				slot += 1
-				returnData[slot] = {name = item.name, label = item.label, weight = weight, slot = slot, count = data.amount, description = item.description, metadata = metadata, stack = item.stack, close = item.close}
+				returnData[slot] = {name = item.name, label = item.label, weight = weight, slot = slot, count = count, description = item.description, metadata = metadata, stack = item.stack, close = item.close}
 			end
 		end
 
 		return returnData, totalWeight
 	end
 end
+
+function server.setPlayerStatus(playerId, values)
+	local Player = QBCore.Functions.GetPlayer(playerId)
+
+	if not Player then return end
+
+	local playerMetadata = Player.PlayerData.metadata
+
+	for name, value in pairs(values) do
+		if playerMetadata[name] then
+			if value > 100 or value < -100 then
+				value = value * 0.0001
+			end
+
+			Player.Functions.SetMetaData(name, playerMetadata[name] + value)
+		end
+	end
+end
+
